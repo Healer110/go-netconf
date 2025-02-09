@@ -12,6 +12,7 @@ import (
 	"encoding/xml"
 	"fmt"
 	"io"
+	"strings"
 )
 
 const (
@@ -71,8 +72,23 @@ type RPCReply struct {
 
 func newRPCReply(rawXML []byte, ErrOnWarning bool, messageID string) (*RPCReply, error) {
 	reply := &RPCReply{}
-	reply.RawReply = string(rawXML)
+	// reply.RawReply = string(rawXML)
+	/*
+		2025/02/06 修改源代码，
+		分帧机制：
+		NETCONF 1.1 引入了分帧机制，以解决大数据传输时的性能问题。
+		NETCONF 1.0 使用 ]]>]]> 作为消息结束标记，而 NETCONF 1.1 使用 # 分帧机制来标记消息的长度。
+		这使得 NETCONF 1.1 能够更高效地处理大数据传输，并减少消息解析的复杂性
+		这里新增一个函数，用来将返回的数据去除chunk
+	*/
+	reply.RawReply = ProcessChunkedFraming(string(rawXML))
+	rawXML = []byte(reply.RawReply)
 
+	/*
+		下面的xml.Unmarshal()使用的是函数中传递进来的原始数据，包含trunk fram
+		所以上面事先做了处理，不然会报错如下
+		XML syntax error on line 18: expected attribute name in element
+	*/
 	if err := xml.Unmarshal(rawXML, reply); err != nil {
 		return nil, err
 	}
@@ -86,6 +102,18 @@ func newRPCReply(rawXML []byte, ErrOnWarning bool, messageID string) (*RPCReply,
 				return reply, &rpcErr
 			}
 		}
+	}
+
+	/*
+		2025/02/06 修改源代码:
+		Ok        bool       `xml:",omitempty"`
+		在解析xml字符串时，处理<ok/>标签会有问题，这里重新进行判断，
+		方便在主程序中利用该变量
+	*/
+	if strings.Contains(reply.RawReply, "<ok") {
+		reply.Ok = true
+	} else {
+		reply.Ok = false
 	}
 
 	return reply, nil
